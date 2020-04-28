@@ -79,8 +79,6 @@ class ShapeTesselator
       Standard_Real* VerticesList();
       Standard_Real* NormalsList();
       std::string ExportShapeToThreejsJSONString(char *shape_function_name);
-      std::string ExportShapeToX3DTriangleSet();
-      void ExportShapeToX3D(char *filename, int diffR=1, int diffG=0, int diffB=0);
       Standard_Integer ObjGetTriangleCount();
       Standard_Integer ObjGetInvalidTriangleCount();
       Standard_Integer ObjGetVertexCount();
