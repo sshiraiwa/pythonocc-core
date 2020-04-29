@@ -16,7 +16,6 @@
 ##along with pythonOCC.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-from xml.etree import ElementTree
 
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
@@ -552,8 +551,8 @@ def export_shape_to_svg(shape, filename=None,
 # X3D export #
 ##############
 X3DFILE_HEADER = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.3//EN" "http://www.web3d.org/specifications/x3d-3.3.dtd">
-<X3D profile="Immersive" version="3.3" xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance" xsd:noNamespaceSchemaLocation="http://www.web3d.org/specifications/x3d-3.3.xsd">
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 4.0//EN" "https://www.web3d.org/specifications/x3d-4.0.xsd">
+<X3D profile="Immersive" version="4.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance" xsd:noNamespaceSchemaLocation="https://www.web3d.org/specifications/x3d-4.0.xsd">
 <head>
     <meta name="generator" content="pythonocc-%s X3D exporter (www.pythonocc.org)"/>
     <meta name="creator" content="pythonocc-%s generator"/>
@@ -660,13 +659,7 @@ class X3DExporter:
             x3dfile_str += indexed_lineset_to_x3d_string(self._line_sets, header=False, footer=False)
         x3dfile_str += '</Scene>\n</X3D>\n'
 
-        #
-        # use ElementTree to ensure xml file quality
-        #
-        xml_et = ElementTree.fromstring(x3dfile_str)
-        clean_x3d_str = ElementTree.tostring(xml_et, encoding='utf8').decode('utf8')
-
-        return clean_x3d_str
+        return x3dfile_str
 
     def write_to_file(self, filename, shape_id):
         with open(filename, "w") as f:
