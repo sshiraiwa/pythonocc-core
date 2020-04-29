@@ -673,7 +673,11 @@ class X3DExporter:
             f.write(self.to_x3dfile_string(shape_id))
 
 
-def export_shape_to_X3D_TriangleSet(points_list, normals_list):
+def export_shape_to_X3D_TriangleSet(points_list,
+                                    normals_list,
+                                    number_of_digits_for_points_coordinates=4,
+                                    number_of_digits_for_normals=2,
+                                    epsilon=1e-3):
     """ takes the point_list and normals_list, returns
     a string with the TriangleSet node.
     The points_list and normals_list come from the c++ Tesselator, and
@@ -692,17 +696,16 @@ def export_shape_to_X3D_TriangleSet(points_list, normals_list):
     # https://docs.python.org/3/library/string.html#format-specification-mini-language
     precision_dict = {1: "{0:.1g}", 2: "{0:.2g}", 3: "{0:.3g}", 4: "{0:.4g}", 5: "{0:.5g}",
                       6: "{0:.6g}", 7: "{0:.7g}", 8: "{0:.8g}", 9: "{0:.9g}"}
-    EPSILON=1e-3
-    NUMBER_OF_DIGITS_FOR_NORMALS = 2
-    NUMBER_OF_DIGITS_FOR_POINT_COORDINATES = 4
-    points_str = ' '.join(['0' if abs(p)<EPSILON else "{0:.4g}".format(p) for p in points_list])
-    normals_str = ' '.join(["%i" % round(n * 10 ** NUMBER_OF_DIGITS_FOR_NORMALS) for n in normals_list])
     
-    # change the normals list
-    #normals_to_export = []
-    #for n in normals_list:
-    #    normals_to_export.append(round(n * 10 ** NUMBER_OF_DIGITS_FOR_NORMALS))
+    points_str = ' '.join(['0' if abs(p) < epsilon
+                           else precision_dict[number_of_digits_for_points_coordinates].format(p)
+                           for p in points_list])
+    normals_str = ' '.join(['0' if abs(n) < epsilon
+                            else precision_dict[number_of_digits_for_normals].format(n)
+                            for n in normals_list])
+
     x3d_triangleset_str = X3D_TRIANGLESET_TEMPLATE % (points_str, normals_str)
+
     return x3d_triangleset_str
 
 
