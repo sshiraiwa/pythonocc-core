@@ -22,9 +22,9 @@ import uuid
 
 from OCC import VERSION as OCC_VERSION
 from OCC.Extend.TopologyUtils import is_edge, is_wire, discretize_edge, discretize_wire
-from OCC.Extend.DataExchange import (X3DExporter,
-                                     export_edge_to_indexed_lineset,
-                                     indexed_lineset_to_x3d_string)
+from OCC.Extend.DataExchange import (X3DShapeExporter,
+                                     export_edge_to_lineset,
+                                     lineset_to_x3d_string)
 from OCC.Display.WebGl.simple_server import start_server
 
 def spinning_cursor():
@@ -195,7 +195,7 @@ class HTMLBody:
                                                               round(cur_shp / nb_shape * 100)))
             sys.stdout.flush()
 
-            x3dcontent += '\t\t\t<Inline onload="fitCamera()" mapDEFToID="true" url="%s.x3d"></Inline>\n' % shp_uid
+            x3dcontent += '\t\t\t<Inline onload="fitCamera()" mapDEFToID="true" url="shp%s.x3d"></Inline>\n' % shp_uid
             cur_shp += 1
         x3dcontent += '</transform>'
         x3dcontent += "\t\t</Scene>\n\t</x3d>\n"
@@ -259,20 +259,15 @@ class X3DomRenderer:
             self._x3d_edges[wire_hash] = [color, line_width]
             return self._x3d_shapes, self._x3d_edges
 
-        shape_uuid = uuid.uuid4().hex
-        shape_hash = "shp%s" % shape_uuid
-        x3d_exporter = X3DExporter(shape, vertex_shader, fragment_shader,
-                                   export_edges, color,
-                                   specular_color, shininess, transparency,
-                                   line_color, line_width, mesh_quality)
+        x3d_exporter = X3DShapeExporter(shape, vertex_shader, fragment_shader,
+                                        export_edges, color,
+                                        specular_color, shininess, transparency,
+                                        line_color, line_width, mesh_quality)
         x3d_exporter.compute()
-        x3d_filename = os.path.join(self._path, "%s.x3d" % shape_hash)
-        # the x3d filename is computed from the shape hash
-        shape_id = len(self._x3d_shapes)
-        x3d_exporter.write_to_file(x3d_filename, shape_id)
-
-        self._x3d_shapes[shape_hash] = [export_edges, color, specular_color, shininess,
-                                        transparency, line_color, line_width]
+        x3d_exporter.write_to_file(path=self._path, auto_filename=True)
+        # fill the shape dictionnaries
+        self._x3d_shapes[x3d_exporter.get_shape_id()] = [export_edges, color, specular_color, shininess,
+                                                         transparency, line_color, line_width]
         return self._x3d_shapes, self._x3d_edges
 
     def render(self, addr="localhost", server_port=8080, open_webbrowser=False):
