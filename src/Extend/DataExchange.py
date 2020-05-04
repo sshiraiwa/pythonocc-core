@@ -895,6 +895,6 @@ def lineset_to_x3d_string(str_linesets, header=True, footer=True, ils_id=0):
 
 
 def write_x3d_file(shape, path, filename):
-    x3d_exporter = X3DShapeExporter(shape, verbose=True)
+    x3d_exporter = X3DShapeExporter(shape)
     x3d_exporter.compute()
     x3d_exporter.write_to_file(path, filename)

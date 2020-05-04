@@ -134,13 +134,6 @@ class TestExtendDataExchange(unittest.TestCase):
             etree.parse(get_test_fullname("sample_x3d.x3d"))
 
 
-    def test_x3d_indexedgeometry(self):
-        an_x3d_exporter = X3DShapeExporter(A_TOPODS_SHAPE, export_to_indexed_geometry=True)
-        an_x3d_exporter.compute()
-        an_x3d_exporter.write_to_file(path=SAMPLES_DIRECTORY,
-                                      filename="sample_indexed_x3d.x3d")
-
-
 def suite():
     test_suite = unittest.TestSuite()
     test_suite.addTest(unittest.makeSuite(TestExtendDataExchange))

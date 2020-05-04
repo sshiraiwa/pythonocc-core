@@ -237,8 +237,8 @@ class X3DomRenderer:
             print("X3D exporter, discretize an edge")
             pnts = discretize_edge(shape)
             edge_hash = "edg%s" % uuid.uuid4().hex
-            line_set = export_edge_to_indexed_lineset(pnts)
-            x3dfile_content = indexed_lineset_to_x3d_string([line_set], ils_id=edge_hash)
+            line_set = export_edge_to_lineset(pnts)
+            x3dfile_content = lineset_to_x3d_string([line_set], ils_id=edge_hash)
             edge_full_path = os.path.join(self._path, edge_hash + '.x3d')
             with open(edge_full_path, "w") as edge_file:
                 edge_file.write(x3dfile_content)
@@ -250,8 +250,8 @@ class X3DomRenderer:
             print("X3D exporter, discretize a wire")
             pnts = discretize_wire(shape)
             wire_hash = "wir%s" % uuid.uuid4().hex
-            line_set = export_edge_to_indexed_lineset(pnts)
-            x3dfile_content = indexed_lineset_to_x3d_string([line_set], ils_id=wire_hash)
+            line_set = export_edge_to_lineset(pnts)
+            x3dfile_content = lineset_to_x3d_string([line_set], ils_id=wire_hash)
             wire_full_path = os.path.join(self._path, wire_hash + '.x3d')
             with open(wire_full_path, "w") as wire_file:
                 wire_file.write(x3dfile_content)
