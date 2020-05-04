@@ -16,7 +16,10 @@
 ##along with pythonOCC.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import time
+import uuid
 
+from OCC import VERSION as OCC_VERSION
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.StlAPI import stlapi_Read, StlAPI_Writer
@@ -37,12 +40,12 @@ from OCC.Core.TCollection import TCollection_ExtendedString
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCC.Core.Tesselator import ShapeTesselator
 
 from OCC.Extend.TopologyUtils import (discretize_edge, get_sorted_hlr_edges,
                                       list_of_shapes_to_compound)
-from OCC import VERSION as OCC_VERSION
-from OCC.Core.Tesselator import ShapeTesselator
-
+from OCC.Extend.MeshTools import (convert_tesselation_to_indexed_triangle_set,
+                                  HAVE_NUMPY)
 try:
     import svgwrite
     HAVE_SVGWRITE = True
@@ -551,40 +554,53 @@ def export_shape_to_svg(shape, filename=None,
 # X3D export #
 ##############
 X3DFILE_HEADER = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 4.0//EN" "https://www.web3d.org/specifications/x3d-4.0.xsd">
-<X3D profile="Immersive" version="4.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance" xsd:noNamespaceSchemaLocation="https://www.web3d.org/specifications/x3d-4.0.xsd">
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 4.0//EN" "https://www.web3d.org/specifications/x3d-4.0.dtd">
+<X3D profile='Immersive' version='4.0' xmlns:xsd='http://www.w3.org/2001/XMLSchema-instance' xsd:noNamespaceSchemaLocation='http://www.web3d.org/specifications/x3d-4.0.xsd'>
 <head>
-    <meta name="generator" content="pythonocc-%s X3D exporter (www.pythonocc.org)"/>
-    <meta name="creator" content="pythonocc-%s generator"/>
-    <meta name="identifier" content="http://www.pythonocc.org"/>
-    <meta name="description" content="pythonocc-%s x3dom based shape rendering"/>
+    <meta name='generator' content='pythonocc-%s X3D exporter (www.pythonocc.org)'/>
+    <meta name='creator' content='pythonocc-%s generator'/>
+    <meta name='identifier' content='http://www.pythonocc.org'/>
+    <meta name='description' content='pythonocc-%s x3dom based shape rendering'/>
 </head>
 <Scene>
 """ % (OCC_VERSION, OCC_VERSION, OCC_VERSION)
 
 X3D_TRIANGLESET_TEMPLATE = """
 <TriangleSet solid='false'>
-  <Coordinate point='%s'></Coordinate>
-  <Normal vector='%s'></Normal>
+  <Coordinate point='%s'/>
+  <Normal vector='%s'/>
 </TriangleSet>
 """
 
-class X3DExporter:
-    """ A class for exporting a TopoDS_Shape to an x3d file """
+X3D_INDEXEDTRIANGLESET_TEMPLATE = """
+<IndexedTriangleSet index='%s' solid='false'>
+  <Coordinate point='%s'/>
+  <Normal vector='%s'/>
+</IndexedTriangleSet>
+"""
+
+
+class X3DBaseExporter:
+    """ Abstract class that supports common methods for each
+    subclass
+    """
     def __init__(self,
                  shape,  # the TopoDS shape to mesh
-                 vertex_shader,  # the vertex_shader, passed as a string
-                 fragment_shader,  # the fragment shader, passed as a string
-                 export_edges,  # if yes, edges are exported to IndexedLineSet (might be SLOWW)
-                 color,  # the default shape color
-                 specular_color,  # shape specular color (white by default)
-                 shininess,  # shape shininess
-                 transparency,  # shape transparency
-                 line_color,  # edge color
-                 line_width,  # edge liewidth,
-                 mesh_quality  # mesh quality default is 1., good is <1, bad is >1
+                 vertex_shader="",  # the vertex_shader, passed as a string
+                 fragment_shader="",  # the fragment shader, passed as a string
+                 export_edges=False,  # if yes, edges are exported to IndexedLineSet (might be SLOWW)
+                 color=(0.65, 0.65, 0.7),  # the default shape color
+                 specular_color=(0.2, 0.2, 0.2),  # shape specular color (white by default)
+                 shininess=0.9,  # shape shininess
+                 transparency=0.,  # shape transparency
+                 line_color=(0, 0., 0.),  # edge color
+                 line_width=2.,  # edge liewidth,
+                 mesh_quality=1., # mesh quality default is 1., good is <1, bad is >1
+                 verbose=False, # if True, log info related to export,
+                 export_to_indexed_geometry=False # if true, post process
                 ):
         self._shape = shape
+        self._shape_id = uuid.uuid4().hex
         self._vs = vertex_shader
         self._fs = fragment_shader
         self._export_edges = export_edges
@@ -599,18 +615,92 @@ class X3DExporter:
         self._triangle_sets = []
         self._line_sets = []
         self._x3d_string = ""  # the string that contains the x3d description
+        self._computed = False  # will be true when mesh is computed
+        self._verbose = False
+        # check if geometry can be exported to indexed geometry
+        # numpy must be installed
+        if HAVE_NUMPY and export_to_indexed_geometry:
+            export_to_indexed_geometry = True
+        else:
+            export_to_indexed_geometry = False
+        self._export_to_indexed_geometry = export_to_indexed_geometry
+
+    def get_shape_id(self):
+        return self._shape_id
+
+
+class X3DEdgeExporter(X3DBaseExporter):
+    """ A class for exporting 1d topology such as TopoDS_Wire or TopoDS_Edge
+    This class takes either a TopoDS_Edge, a TopoDS_Wire or a list of TopoDS_Edge
+    or a list of TopoDS_Wire.
+    In any case, all that is passd to this exporter is exported to a single
+    LineSet instance."""
+    def __init__(self, *kargs):
+        super(X3DEdgeExporter, self).__init__(*kargs)
 
     def compute(self):
+        if is_edge(shape):
+            print("X3D exporter, discretize an edge")
+            pnts = discretize_edge(shape)
+            edge_hash = "edg%s" % uuid.uuid4().hex
+            line_set = export_edge_to_lineset(pnts)
+            x3dfile_content = lineset_to_x3d_string([line_set], ils_id=edge_hash)
+            edge_full_path = os.path.join(self._path, edge_hash + '.x3d')
+            with open(edge_full_path, "w") as edge_file:
+                edge_file.write(x3dfile_content)
+            # store this edge hash
+            self._x3d_edges[edge_hash] = [color, line_width]
+            return self._x3d_shapes, self._x3d_edges
+
+        if is_wire(shape):
+            print("X3D exporter, discretize a wire")
+            pnts = discretize_wire(shape)
+            wire_hash = "wir%s" % uuid.uuid4().hex
+            line_set = export_edge_to_lineset(pnts)
+            x3dfile_content = lineset_to_x3d_string([line_set], ils_id=wire_hash)
+            wire_full_path = os.path.join(self._path, wire_hash + '.x3d')
+            with open(wire_full_path, "w") as wire_file:
+                wire_file.write(x3dfile_content)
+            # store this edge hash
+            self._x3d_edges[wire_hash] = [color, line_width]
+            return self._x3d_shapes, self._x3d_edges
+
+
+class X3DShapeExporter(X3DBaseExporter):
+    """ A class for exporting a single TopoDS_Shape to an x3d file """
+    def __init__(self, *kargs):
+        super(X3DShapeExporter, self).__init__(*kargs)
+
+    def compute(self):
+        """ compute meshes, return True if successful
+        """
+        if self._verbose:
+            init_time = time.perf_counter()
+            print("start meshing")
         shape_tesselator = ShapeTesselator(self._shape)
         shape_tesselator.Compute(compute_edges=self._export_edges,
                                  mesh_quality=self._mesh_quality,
                                  parallel=True)
+        if self._verbose:
+            init_time = time.perf_counter()
+            print("meshing done")
+
         points = shape_tesselator.GetVerticesPositionAsTuple()
         normals = shape_tesselator.GetNormalsAsTuple()
-        x3d_triangleset_representation = export_shape_to_X3D_TriangleSet(points, normals)
-        self._triangle_sets.append(x3d_triangleset_representation)
+        if self._export_to_indexed_geometry:
+            if self._verbose:
+                print("start converting to indexed geometry")
+
+            idx, u_vertices = convert_tesselation_to_indexed_triangle_set(shape_tesselator)
+            if self._verbose:
+                print("converting to indexed geometry done")
+            x3d_representation = export_shape_to_X3D_IndexedTriangleSet(idx, u_vertices, normals)
+        else:
+            x3d_representation = export_shape_to_X3D_TriangleSet(points, normals)
+        self._triangle_sets.append(x3d_representation)
         # then process edges
         if self._export_edges:
+            all_edges = []  # the list of point coordinates for all edges
             # get number of edges
             nbr_edges = shape_tesselator.ObjGetEdgeCount()
             for i_edge in range(nbr_edges):
@@ -618,13 +708,21 @@ class X3DExporter:
                 nbr_vertices = shape_tesselator.ObjEdgeGetVertexCount(i_edge)
                 for i_vert in range(nbr_vertices):
                     edge_point_set.append(shape_tesselator.GetEdgeVertex(i_edge, i_vert))
-                ils = export_edge_to_indexed_lineset(edge_point_set)
-                self._line_sets.append(ils)
+                all_edges.append(edge_point_set)
+            #ils = export_edge_to_lineset(edge_point_set)
+            ls = export_list_of_edges_to_lineset(all_edges)            
+            self._line_sets.append(ls)
+        self._computed = True
+        if self._verbose:
+            final_time = time.perf_counter()
+            print("Computation time:", final_time - init_time, "s")
+        return True
 
-    def to_x3dfile_string(self, shape_id):
+
+    def to_x3dfile_string(self):
         x3dfile_str = X3DFILE_HEADER
         for triangle_set in self._triangle_sets:
-            x3dfile_str += "<Switch whichChoice='0' id='swBRP'><Transform scale='1 1 1'><Shape DEF='shape%i' onclick='" % shape_id
+            x3dfile_str += "<Switch whichChoice='0' id='swBRP'><Transform scale='1 1 1'><Shape DEF='shape%s' onclick='" % self._shape_id
             x3dfile_str += "select(this);"
             x3dfile_str += "'><Appearance>\n"
             #
@@ -652,18 +750,36 @@ class X3DExporter:
             x3dfile_str += "</Shape></Transform></Switch>\n"
         # and now, process edges
         if self._export_edges:
-            # below '0' means show all
-            # -1 means doesn't show line
-            # the "Switch" node selects the group to be displayed
-
-            x3dfile_str += indexed_lineset_to_x3d_string(self._line_sets, header=False, footer=False)
+            x3dfile_str += lineset_to_x3d_string(self._line_sets, header=False, footer=False)
         x3dfile_str += '</Scene>\n</X3D>\n'
 
         return x3dfile_str
 
-    def write_to_file(self, filename, shape_id):
-        with open(filename, "w") as f:
-            f.write(self.to_x3dfile_string(shape_id))
+    def write_to_file(self, path, filename="", auto_filename=False):
+        """ write to a file. If autofilename is set to True then
+        the file name is "shp" and the shape id appended.
+        """
+        if auto_filename:
+            filename = "shp%s" % self._shape_id + ".x3d"
+        full_filename = os.path.join(path, filename)
+        with open(full_filename, "w") as f:
+            f.write(self.to_x3dfile_string())
+        # check that the file was written
+        if not os.path.isfile(full_filename):
+            raise IOError("x3d file not written.")
+        return filename
+
+
+def approximate_listoffloat_to_str(list_of_floats, ndigits=3, epsilon=1e-3):
+    """ take a list of floats, returns a simplified list
+    of formatted floats
+    """
+    precision_dict = {1: "{0:.1g}", 2: "{0:.2g}", 3: "{0:.3g}", 4: "{0:.4g}", 5: "{0:.5g}",
+                      6: "{0:.6g}", 7: "{0:.7g}", 8: "{0:.8g}", 9: "{0:.9g}"}
+    listoffloat_to_str = ' '.join(['0' if abs(float_number) < epsilon
+                                   else precision_dict[ndigits].format(float_number)
+                                   for float_number in list_of_floats])
+    return listoffloat_to_str
 
 
 def export_shape_to_X3D_TriangleSet(points_list,
@@ -687,22 +803,59 @@ def export_shape_to_X3D_TriangleSet(points_list,
     # format points coordinates using the "g" type,
     # see python doc at
     # https://docs.python.org/3/library/string.html#format-specification-mini-language
-    precision_dict = {1: "{0:.1g}", 2: "{0:.2g}", 3: "{0:.3g}", 4: "{0:.4g}", 5: "{0:.5g}",
-                      6: "{0:.6g}", 7: "{0:.7g}", 8: "{0:.8g}", 9: "{0:.9g}"}
     
-    points_str = ' '.join(['0' if abs(p) < epsilon
-                           else precision_dict[number_of_digits_for_points_coordinates].format(p)
-                           for p in points_list])
-    normals_str = ' '.join(['0' if abs(n) < epsilon
-                            else precision_dict[number_of_digits_for_normals].format(n)
-                            for n in normals_list])
+    points_str = approximate_listoffloat_to_str(points_list)
+    normals_str = approximate_listoffloat_to_str(normals_list)
 
     x3d_triangleset_str = X3D_TRIANGLESET_TEMPLATE % (points_str, normals_str)
 
     return x3d_triangleset_str
 
 
-def export_edge_to_indexed_lineset(edge_point_set):
+def export_shape_to_X3D_IndexedTriangleSet(idx_lst,
+                                           points_list,
+                                           normals_list = [],
+                                           number_of_digits_for_points_coordinates=4,
+                                           epsilon=1e-3):
+    index_str = ' '.join(map(str, idx_lst))
+    points_str = approximate_listoffloat_to_str(points_list)
+    normals_str = approximate_listoffloat_to_str(normals_list)
+    x3d_triangleset_str = X3D_INDEXEDTRIANGLESET_TEMPLATE % (index_str,
+                                                             points_str,
+                                                             normals_str)
+
+    return x3d_triangleset_str
+
+
+def export_list_of_edges_to_lineset(list_of_edge_point_set):
+    """ see issue https://github.com/andreasplesch/OCCToX3D/issues/1
+    Yes, you can combine the edges into a single Shape, using LineSet or using IndexedLineSet. Here are examples:
+    https://x3dgraphics.com/examples/X3dForWebAuthors/Chapter06GeometryPointsLinesPolygons/LineSetComparisonIndex.html
+    Note the vertexCount field of LineSet. It can have multiple entries, each one defining a separate line.
+    So the three LineSets in your example would become:
+    <LinesSet vertexCount='2 2 2' point='10 20 10, 10 20 40, 10 0 10, 10 20 10, 0 0 10, 10 0 10' />
+    
+    as input, we get a list of 3 floats list
+    """
+    # first, we determine the number of points of each edge
+    vertexCount_str = ' '.join(["%i" % len(a) for a in list_of_edge_point_set])
+    str_x3d_to_return = "\t<LineSet vertexCount='%s'>" % vertexCount_str
+    # the we export point coordinates
+    # TODO a numpy reshape could here do the job much faster
+    coords = []
+    for edge_point_set in list_of_edge_point_set:
+        for p in edge_point_set:
+            coords.append(p[0])
+            coords.append(p[1])
+            coords.append(p[2])
+    # the we build the string from these coords
+    coords_str = ' '.join("%g" % c for c in coords)
+    str_x3d_to_return += "<Coordinate point='%s'/>\n" % coords_str
+    str_x3d_to_return += "</LineSet>\n"
+    return str_x3d_to_return
+
+
+def export_edge_to_lineset(edge_point_set):
     str_x3d_to_return = "\t<LineSet vertexCount='%i'>" % len(edge_point_set)
     str_x3d_to_return += "<Coordinate point='"
     for p in edge_point_set:
@@ -711,7 +864,7 @@ def export_edge_to_indexed_lineset(edge_point_set):
     return str_x3d_to_return
 
 
-def indexed_lineset_to_x3d_string(str_linesets, header=True, footer=True, ils_id=0):
+def lineset_to_x3d_string(str_linesets, header=True, footer=True, ils_id=0):
     """ takes an str_lineset, coming for instance from export_curve_to_ils,
     and export to an X3D string"""
     if header:
@@ -736,3 +889,9 @@ def indexed_lineset_to_x3d_string(str_linesets, header=True, footer=True, ils_id
         x3dfile_str += '</Scene>\n</X3D>\n'
 
     return x3dfile_str
+
+
+def write_x3d_file(shape, path, filename):
+    x3d_exporter = X3DShapeExporter(shape, verbose=True)
+    x3d_exporter.compute()
+    x3d_exporter.write_to_file(path, filename)
