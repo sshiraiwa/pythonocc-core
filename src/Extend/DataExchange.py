@@ -44,8 +44,12 @@ from OCC.Core.Tesselator import ShapeTesselator
 
 from OCC.Extend.TopologyUtils import (discretize_edge, get_sorted_hlr_edges,
                                       list_of_shapes_to_compound)
-from OCC.Extend.MeshTools import (convert_tesselation_to_indexed_triangle_set,
-                                  HAVE_NUMPY)
+try:
+    from OCC.Extend.MeshTools import optimize_mesh
+    HAVE_MESH_TOOLS = True
+except:
+    HAVE_MESH_TOOLS = False
+
 try:
     import svgwrite
     HAVE_SVGWRITE = True
@@ -597,7 +601,7 @@ class X3DBaseExporter:
                  line_width=2.,  # edge liewidth,
                  mesh_quality=1., # mesh quality default is 1., good is <1, bad is >1
                  verbose=False, # if True, log info related to export,
-                 export_to_indexed_geometry=False # if true, post process
+                 optimize_mesh=True # if true, post process mesh to improve quality/performance
                 ):
         self._shape = shape
         self._shape_id = uuid.uuid4().hex
@@ -619,11 +623,11 @@ class X3DBaseExporter:
         self._verbose = False
         # check if geometry can be exported to indexed geometry
         # numpy must be installed
-        if HAVE_NUMPY and export_to_indexed_geometry:
-            export_to_indexed_geometry = True
+        if HAVE_MESH_TOOLS and optimize_mesh:
+            optimize_mesh = True
         else:
-            export_to_indexed_geometry = False
-        self._export_to_indexed_geometry = export_to_indexed_geometry
+            optimize_mesh = False
+        self._optimize_mesh = optimize_mesh
 
     def get_shape_id(self):
         return self._shape_id
@@ -687,11 +691,10 @@ class X3DShapeExporter(X3DBaseExporter):
 
         points = shape_tesselator.GetVerticesPositionAsTuple()
         normals = shape_tesselator.GetNormalsAsTuple()
-        if self._export_to_indexed_geometry:
+        if self._optimize_mesh:
             if self._verbose:
-                print("start converting to indexed geometry")
-
-            idx, u_vertices = convert_tesselation_to_indexed_triangle_set(shape_tesselator)
+                print("start optimizing mesh")
+            idx, vertices, normals = optimize_mesh(shape_tesselator)
             if self._verbose:
                 print("converting to indexed geometry done")
             x3d_representation = export_shape_to_X3D_IndexedTriangleSet(idx, u_vertices, normals)
